@@ -1,0 +1,8 @@
+{
+  "name": "Remix TechClass",
+  "description": "Digital classroom and exam preparation platform for Indian government competitive exams (UPSC, MPSC, SSC, Banking, Railway, Police Bharti) with courses, tests, protected digital library, and Supabase cloud backend integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
