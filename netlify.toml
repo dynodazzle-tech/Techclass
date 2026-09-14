@@ -1,0 +1,21 @@
+# Netlify Configuration for TechClass EdTech Platform
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Reverse proxy /api/* requests to the live Cloud Run backend server
+# This prevents Netlify from serving index.html (<!DOCTYPE...) on API routes
+[[redirects]]
+  from = "/api/*"
+  to = "https://ais-dev-obtfhzcdq5m2dtqltd42mb-16516054101.asia-east1.run.app/api/:splat"
+  status = 200
+  force = true
+
+# Single Page Application SPA fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

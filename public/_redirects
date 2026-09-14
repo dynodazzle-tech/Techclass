@@ -1,0 +1,6 @@
+# Netlify Redirects Configuration for TechClass
+# 1. API proxy - forward /api calls to backend server
+/api/*  https://ais-dev-obtfhzcdq5m2dtqltd42mb-16516054101.asia-east1.run.app/api/:splat  200!
+
+# 2. Single Page Application (SPA) routing fallback
+/*  /index.html  200

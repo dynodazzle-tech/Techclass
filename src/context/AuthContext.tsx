@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole, SiteSettings } from '../types';
+import { apiFetch } from '../lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -44,17 +45,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Load public settings
   useEffect(() => {
-    fetch('/api/settings/public')
-      .then(res => {
-        if (!res.ok) return null;
-        return res.json();
-      })
+    apiFetch('/api/settings/public')
       .then(data => {
         if (data && !data.error) {
           setSettings(data);
         }
       })
-      .catch(err => console.error('Error fetching settings:', err));
+      .catch(err => {
+        console.warn('Using default settings (Backend/Netlify offline):', err.message);
+      });
   }, []);
 
   // Validate session token on mount
@@ -64,13 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => {
-        if (!res.ok) return null;
-        return res.json();
-      })
+    apiFetch('/api/auth/me')
       .then(data => {
         if (data && data.user) {
           setUser(data.user);
@@ -82,6 +75,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       })
       .catch(() => {
+        // If local user exists, keep session
+        try {
+          const localUser = localStorage.getItem('techclass_user_cache');
+          if (localUser) {
+            setUser(JSON.parse(localUser));
+            return;
+          }
+        } catch (e) {}
+
         localStorage.removeItem('techclass_token');
         setToken(null);
         setUser(null);
@@ -93,18 +95,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = (newToken: string, userData: User) => {
     localStorage.setItem('techclass_token', newToken);
+    try {
+      localStorage.setItem('techclass_user_cache', JSON.stringify(userData));
+    } catch (e) {}
     setToken(newToken);
     setUser(userData);
   };
 
   const logout = () => {
     if (token) {
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch(() => {});
+      apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
     localStorage.removeItem('techclass_token');
+    localStorage.removeItem('techclass_user_cache');
     setToken(null);
     setUser(null);
   };

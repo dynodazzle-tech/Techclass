@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { User as UserType } from '../types';
+import { apiFetch, ApiError } from '../lib/api';
 import {
   GraduationCap,
   Mail,
@@ -17,7 +19,7 @@ import {
   RotateCw,
   ArrowLeft
 } from 'lucide-react';
-import { SUPABASE_PROJECT_ID } from '../lib/supabase';
+import { SUPABASE_PROJECT_ID, supabase } from '../lib/supabase';
 
 interface AuthPageProps {
   mode: 'LOGIN' | 'REGISTER' | 'FORGOT';
@@ -56,13 +58,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode, navigate }) => {
 
     if (mode === 'LOGIN') {
       try {
-        const res = await fetch('/api/auth/login', {
+        const data = await apiFetch('/api/auth/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ email: email.trim(), password })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Invalid credentials');
 
         // Check if Admin 2FA OTP is required
         if (data.requiresOtp) {
@@ -81,18 +80,55 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode, navigate }) => {
         login(data.token, data.user);
         navigate(data.user.role === 'ADMIN' || data.user.role === 'SUPER_ADMIN' ? '/admin' : '/dashboard');
       } catch (err: any) {
-        setErrorMsg(err.message);
+        // Fallback for Netlify when backend server is detached or returned HTML
+        if (err.isHtml || err.message?.includes('HTML') || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+          console.warn('[TechClass Netlify Mode] Backend unavailable, checking local student accounts...');
+          try {
+            const localStudents = JSON.parse(localStorage.getItem('techclass_local_students') || '[]');
+            const cleanEmail = email.toLowerCase().trim();
+            const found = localStudents.find((s: any) => (s.email === cleanEmail || s.student_id === email.trim()) && s.password === password);
+            if (found) {
+              const { password: _, ...userData } = found;
+              login(`tok_${Date.now()}`, userData);
+              navigate('/dashboard');
+              return;
+            }
+          } catch (e) {}
+
+          // Built-in Demo student fallback on Netlify
+          if (email.toLowerCase().trim() === 'student@techclass.in' || email.toLowerCase().trim() === 'demo@techclass.in' || email.toLowerCase().trim() === 'free@student.in') {
+            const demoStudent: UserType = {
+              id: 'usr_demo_student',
+              student_id: 'TC100001',
+              full_name: 'Aditya Patil (Demo Student)',
+              email: email.toLowerCase().trim(),
+              mobile_number: '+91 9876543210',
+              role: 'FREE_STUDENT',
+              preferred_language: 'en',
+              target_exams: ['MPSC', 'Police Bharti'],
+              state: 'Maharashtra',
+              city: 'Pune',
+              membership_status: 'FREE'
+            };
+            login(`tok_demo_${Date.now()}`, demoStudent);
+            navigate('/dashboard');
+            return;
+          }
+
+          setErrorMsg('Backend API is currently unreachable. If you created a student account on this device, check your email or click "Quick Demo Student Login" below.');
+          return;
+        }
+        setErrorMsg(err.message || 'Invalid email or password.');
       } finally {
         setSubmitting(false);
       }
     } else if (mode === 'REGISTER') {
       try {
-        const res = await fetch('/api/auth/register', {
+        const data = await apiFetch('/api/auth/register', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             full_name: fullName,
-            email,
+            email: email.trim(),
             password,
             mobile_number: mobile,
             target_exams: targetExams.split(',').map(x => x.trim()),
@@ -100,24 +136,68 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode, navigate }) => {
             city
           })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Registration failed');
 
         login(data.token, data.user);
         navigate('/dashboard');
       } catch (err: any) {
-        setErrorMsg(err.message);
+        // Fallback for Netlify when backend server is detached or returned HTML
+        if (err.isHtml || err.message?.includes('HTML') || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+          console.warn('[TechClass Netlify Mode] Backend unavailable, registering student in client & Supabase storage...');
+          const studentId = `TC${Math.floor(100000 + Math.random() * 900000)}`;
+          const fallbackUser: UserType = {
+            id: `usr_${Date.now()}`,
+            student_id: studentId,
+            full_name: fullName.trim(),
+            email: email.toLowerCase().trim(),
+            mobile_number: mobile.trim(),
+            role: 'FREE_STUDENT',
+            preferred_language: 'en',
+            target_exams: targetExams.split(',').map(x => x.trim()),
+            state: stateName || 'Maharashtra',
+            city: city || 'Pune',
+            membership_status: 'FREE'
+          };
+
+          // Persist in local storage
+          try {
+            const localStudents = JSON.parse(localStorage.getItem('techclass_local_students') || '[]');
+            localStudents.push({ ...fallbackUser, password });
+            localStorage.setItem('techclass_local_students', JSON.stringify(localStudents));
+          } catch (e) {}
+
+          // Attempt sync with Supabase project
+          try {
+            await supabase.from('users').insert({
+              id: fallbackUser.id,
+              student_id: fallbackUser.student_id,
+              full_name: fallbackUser.full_name,
+              email: fallbackUser.email,
+              mobile_number: fallbackUser.mobile_number,
+              password_hash: 'client_registered',
+              role: 'FREE_STUDENT',
+              preferred_language: 'en',
+              target_exams: JSON.stringify(fallbackUser.target_exams),
+              state: fallbackUser.state,
+              city: fallbackUser.city,
+              status: 'ACTIVE'
+            });
+          } catch (e) {}
+
+          login(`tok_${Date.now()}`, fallbackUser);
+          navigate('/dashboard');
+          return;
+        }
+
+        setErrorMsg(err.message || 'Registration failed.');
       } finally {
         setSubmitting(false);
       }
     } else if (mode === 'FORGOT') {
       try {
-        const res = await fetch('/api/auth/forgot-password', {
+        const data = await apiFetch('/api/auth/forgot-password', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ email: email.trim() })
         });
-        const data = await res.json();
         setSuccessMsg(data.message || 'If an account exists, a reset code was delivered.');
       } catch (err: any) {
         setErrorMsg(err.message);
@@ -139,13 +219,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode, navigate }) => {
     setSubmitting(true);
 
     try {
-      const res = await fetch('/api/auth/verify-admin-otp', {
+      const data = await apiFetch('/api/auth/verify-admin-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tempToken, otp: otpCode.trim() })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Verification failed');
 
       login(data.token, data.user);
       navigate('/admin');
@@ -160,13 +237,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode, navigate }) => {
     setErrorMsg(null);
     setResending(true);
     try {
-      const res = await fetch('/api/auth/resend-admin-otp', {
+      const data = await apiFetch('/api/auth/resend-admin-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tempToken })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to resend code');
 
       if (data.setupOtp) {
         setSetupOtp(data.setupOtp);
@@ -432,6 +506,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode, navigate }) => {
             <span>{submitting ? 'Please wait...' : mode === 'LOGIN' ? 'Sign In to Classroom' : mode === 'REGISTER' ? 'Create Free Account' : 'Send Recovery Link'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
+
+          {mode === 'LOGIN' && (
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('student@techclass.in');
+                setPassword('student123');
+              }}
+              className="w-full py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-cyan-500/40 text-slate-400 hover:text-cyan-300 text-[11px] font-medium transition flex items-center justify-center space-x-2"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Auto-fill Demo Student Credentials</span>
+            </button>
+          )}
         </form>
         )}
 

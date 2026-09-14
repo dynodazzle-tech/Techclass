@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { BookmarkItem, NoteItem, NotificationItem } from '../types';
+import { apiFetch } from '../lib/api';
 import {
   Crown,
   BookOpen,
@@ -38,33 +39,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ navigate }) => {
   const [showNoteForm, setShowNoteForm] = useState(false);
 
   useEffect(() => {
-    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-
-    fetch('/api/student/test-attempts', { headers: authHeaders })
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<any[]>('/api/student/test-attempts')
       .then(data => Array.isArray(data) && setTestAttempts(data))
       .catch(() => {});
 
     if (!token) return;
 
-    fetch('/api/student/bookmarks', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<BookmarkItem[]>('/api/student/bookmarks')
       .then(data => Array.isArray(data) && setBookmarks(data))
       .catch(() => {});
 
-    fetch('/api/student/notes', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<NoteItem[]>('/api/student/notes')
       .then(data => Array.isArray(data) && setNotes(data))
       .catch(() => {});
 
-    fetch('/api/student/notifications', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<NotificationItem[]>('/api/student/notifications')
       .then(data => Array.isArray(data) && setNotifications(data))
       .catch(() => {});
   }, [token]);
@@ -74,22 +63,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ navigate }) => {
     if (!token || !newNoteText.trim()) return;
 
     try {
-      const res = await fetch('/api/student/notes', {
+      const created = await apiFetch<NoteItem>('/api/student/notes', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
         body: JSON.stringify({
           title: newNoteTitle || 'Study Note',
           note_text: newNoteText
         })
       });
-      const created = await res.json();
-      setNotes(prev => [created, ...prev]);
-      setNewNoteTitle('');
-      setNewNoteText('');
-      setShowNoteForm(false);
+      if (created) {
+        setNotes(prev => [created, ...prev]);
+        setNewNoteTitle('');
+        setNewNoteText('');
+        setShowNoteForm(false);
+      }
     } catch (err) {
       console.error(err);
     }

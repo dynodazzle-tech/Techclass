@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Course, TestPaper, PdfDocument } from '../types';
+import { apiFetch } from '../lib/api';
 import {
   GraduationCap,
   BookOpen,
@@ -40,18 +41,15 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
   const [faqOpen, setFaqOpen] = useState<number | null>(0);
 
   useEffect(() => {
-    fetch('/api/courses')
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<Course[]>('/api/courses')
       .then(data => Array.isArray(data) && setCourses(data.slice(0, 3)))
       .catch(() => {});
 
-    fetch('/api/tests')
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<TestPaper[]>('/api/tests')
       .then(data => Array.isArray(data) && setTests(data.slice(0, 3)))
       .catch(() => {});
 
-    fetch('/api/library/items')
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<PdfDocument[]>('/api/library/items')
       .then(data => Array.isArray(data) && setPdfs(data.slice(0, 3)))
       .catch(() => {});
   }, []);
