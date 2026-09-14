@@ -56,15 +56,6 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
               DynoDazzle EdTech
             </span>
-            <button
-              onClick={() => navigate('/admin')}
-              className="hidden sm:inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition"
-              title="Supabase Backend: Connected (Project ID: nuvxtpwgdlzeqsdnbnpx)"
-            >
-              <Database className="w-3 h-3 text-emerald-400" />
-              <span>Supabase: nuvxtpwgdlzeqsdnbnpx</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            </button>
             <span className="hidden lg:inline text-slate-400">
               Digital Classroom for UPSC, MPSC & SSC
             </span>

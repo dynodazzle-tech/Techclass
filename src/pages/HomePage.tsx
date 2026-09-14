@@ -99,12 +99,6 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
           <div className="text-center space-y-6 max-w-4xl mx-auto">
-            {/* Top Eyebrow Tag */}
-            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-semibold shadow-inner">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Technology-Driven Government Exam Platform • DynoDazzle</span>
-            </div>
-
             {/* Headline */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
               Your Digital Classroom for <br />
