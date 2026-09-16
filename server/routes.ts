@@ -51,9 +51,46 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 // Admin middleware
+export function isUserAdmin(sessionOrUser: any): boolean {
+  if (!sessionOrUser) return false;
+  const role = sessionOrUser.role;
+  const email = (sessionOrUser.email || '').toLowerCase().trim();
+  return role === 'ADMIN' || role === 'SUPER_ADMIN' || email === 'dynodazzle@gmail.com' || email === 'admin@techclass.in';
+}
+
+export function formatUserResponse(user: any, sub?: any) {
+  const isAdmin = isUserAdmin(user);
+  let targetExams = [];
+  try {
+    targetExams = typeof user.target_exams === 'string' ? JSON.parse(user.target_exams) : user.target_exams;
+  } catch {
+    targetExams = [user.target_exams || 'UPSC'];
+  }
+
+  const isPaid = user.role === 'PAID_STUDENT' || (sub && sub.status === 'ACTIVE');
+
+  return {
+    id: user.id,
+    student_id: isAdmin ? null : user.student_id,
+    full_name: user.full_name,
+    email: user.email,
+    mobile_number: user.mobile_number,
+    role: isAdmin ? 'SUPER_ADMIN' : user.role,
+    is_owner: isAdmin && (user.email === 'dynodazzle@gmail.com' || user.role === 'SUPER_ADMIN'),
+    is_admin: isAdmin,
+    preferred_language: user.preferred_language || 'en',
+    target_exams: targetExams || ['UPSC', 'MPSC'],
+    state: user.state || 'Maharashtra',
+    city: user.city || '',
+    membership_status: isAdmin ? 'ACTIVE' : (isPaid ? 'ACTIVE' : (sub?.status || 'FREE')),
+    plan_name: isAdmin ? 'App Owner / Lifetime Master Pass' : (isPaid ? (sub?.plan_name || 'TechClass Annual Pass') : (sub?.plan_name || 'Free Tier')),
+    expiry_date: isAdmin ? 'Lifetime Master Access' : (sub?.expiry_date || null)
+  };
+}
+
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const session = getSessionUser(req);
-  if (!session || (session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN')) {
+  if (!session || !isUserAdmin(session)) {
     return res.status(403).json({ error: 'Access denied. Administrative privileges required.' });
   }
   (req as any).user = session;
@@ -101,9 +138,22 @@ apiRouter.post('/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'All primary fields (Name, Email, Mobile, Password) are required.' });
     }
 
-    const existingUser = queryOne('SELECT id FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+    const cleanEmail = email.toLowerCase().trim();
+
+    if (cleanEmail === 'dynodazzle@gmail.com' || cleanEmail === 'admin@techclass.in') {
+      return res.status(403).json({
+        error: 'This email belongs to the Platform Owner & Administrator. It cannot be registered as a student account. Please use Admin Login.'
+      });
+    }
+
+    const existingUser = queryOne<any>('SELECT id, role FROM users WHERE email = ?', [cleanEmail]);
     if (existingUser) {
-      return res.status(400).json({ error: 'An account with this email address already exists.' });
+      if (existingUser.role === 'ADMIN' || existingUser.role === 'SUPER_ADMIN') {
+        return res.status(403).json({
+          error: 'This email belongs to the Platform Administrator and cannot be used as a student ID. Please sign in via Admin Login.'
+        });
+      }
+      return res.status(400).json({ error: 'An account with this email address already exists. Please log in.' });
     }
 
     // Generate unique sequential Student ID (e.g. TC100004)
@@ -266,12 +316,12 @@ apiRouter.post('/auth/login', async (req, res) => {
     }
 
     // Standard student login
-    // Check active subscription
-    const sub = queryOne<any>('SELECT status, expiry_date FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', [user.id]);
-    let membershipStatus = sub?.status || 'FREE';
-    if (membershipStatus === 'ACTIVE' && sub?.expiry_date && new Date(sub.expiry_date) < new Date()) {
-      membershipStatus = 'EXPIRED';
-      runSql("UPDATE subscriptions SET status = 'EXPIRED' WHERE user_id = ?", [user.id]);
+    // Check active subscription or approved payment
+    const sub = queryOne<any>('SELECT status, expiry_date, plan_name FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', [user.id]);
+    const approvedPayment = queryOne<any>("SELECT id FROM payments WHERE user_id = ? AND status = 'APPROVED'", [user.id]);
+    if (approvedPayment && user.role !== 'PAID_STUDENT' && !isUserAdmin(user)) {
+      runSql("UPDATE users SET role = 'PAID_STUDENT' WHERE id = ?", [user.id]);
+      user.role = 'PAID_STUDENT';
     }
 
     const sessionToken = 'tok_' + crypto.randomBytes(32).toString('hex');
@@ -283,29 +333,9 @@ apiRouter.post('/auth/login', async (req, res) => {
       expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
     });
 
-    let targetExams = [];
-    try {
-      targetExams = JSON.parse(user.target_exams);
-    } catch {
-      targetExams = [user.target_exams];
-    }
-
     res.json({
       token: sessionToken,
-      user: {
-        id: user.id,
-        student_id: user.student_id,
-        full_name: user.full_name,
-        email: user.email,
-        mobile_number: user.mobile_number,
-        role: user.role,
-        preferred_language: user.preferred_language,
-        target_exams: targetExams,
-        state: user.state,
-        city: user.city,
-        membership_status: membershipStatus,
-        expiry_date: sub?.expiry_date || null
-      }
+      user: formatUserResponse(user, sub)
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -391,20 +421,7 @@ apiRouter.post('/auth/verify-admin-otp', (req, res) => {
     res.json({
       message: 'Two-Factor Authentication successful. Welcome to TechClass Administration!',
       token: sessionToken,
-      user: {
-        id: user.id,
-        student_id: user.student_id,
-        full_name: user.full_name,
-        email: user.email,
-        mobile_number: user.mobile_number,
-        role: user.role,
-        preferred_language: user.preferred_language,
-        target_exams: targetExams,
-        state: user.state,
-        city: user.city,
-        membership_status: sub?.status || 'ACTIVE',
-        expiry_date: sub?.expiry_date || null
-      }
+      user: formatUserResponse(user, sub)
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -564,28 +581,17 @@ apiRouter.get('/auth/me', requireAuth, (req, res) => {
     const sub = queryOne<any>('SELECT status, expiry_date, plan_name FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', [user.id]);
     const profile = queryOne<any>('SELECT bio, study_streak, total_study_minutes FROM student_profiles WHERE user_id = ?', [user.id]);
 
-    let targetExams = [];
-    try {
-      targetExams = JSON.parse(user.target_exams);
-    } catch {
-      targetExams = [user.target_exams];
+    const approvedPayment = queryOne<any>("SELECT id FROM payments WHERE user_id = ? AND status = 'APPROVED'", [user.id]);
+    if (approvedPayment && user.role !== 'PAID_STUDENT' && !isUserAdmin(user)) {
+      runSql("UPDATE users SET role = 'PAID_STUDENT' WHERE id = ?", [user.id]);
+      user.role = 'PAID_STUDENT';
     }
+
+    const formatted = formatUserResponse(user, sub);
 
     res.json({
       user: {
-        id: user.id,
-        student_id: user.student_id,
-        full_name: user.full_name,
-        email: user.email,
-        mobile_number: user.mobile_number,
-        role: user.role,
-        preferred_language: user.preferred_language,
-        target_exams: targetExams,
-        state: user.state,
-        city: user.city,
-        membership_status: sub?.status || 'FREE',
-        plan_name: sub?.plan_name || 'Free Tier',
-        expiry_date: sub?.expiry_date || null,
+        ...formatted,
         study_streak: profile?.study_streak || 1,
         total_study_minutes: profile?.total_study_minutes || 0,
         bio: profile?.bio || ''
@@ -604,18 +610,25 @@ apiRouter.post('/auth/logout', (req, res) => {
   res.json({ message: 'Logged out successfully.' });
 });
 
-// Password recovery via OTP
-apiRouter.post('/auth/send-otp', async (req, res) => {
+// Password recovery via OTP (Works for Admin / App Owner and Students)
+apiRouter.post(['/auth/forgot-password', '/auth/send-otp'], async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required.' });
+    if (!email) return res.status(400).json({ error: 'Registered email address or Student ID is required.' });
 
-    const user = queryOne<any>('SELECT id, full_name FROM users WHERE email = ?', [email.toLowerCase().trim()]);
-    // Do not reveal account existence to prevent enumeration
+    const cleanInput = email.toLowerCase().trim();
+    // Allow lookup by registered email, Student ID (e.g. TC100001), or mobile number
+    const user = queryOne<any>(
+      'SELECT id, full_name, email, role, student_id, mobile_number FROM users WHERE LOWER(email) = ? OR LOWER(student_id) = ? OR mobile_number = ?',
+      [cleanInput, cleanInput, cleanInput]
+    );
+
     if (!user) {
-      return res.json({ message: 'If an account exists with this email, a security OTP has been sent.' });
+      return res.status(404).json({ error: 'No account registered with this email or Student ID. Please check your credentials or register.' });
     }
 
+    const cleanEmail = user.email.toLowerCase().trim();
+    const isAdmin = isUserAdmin(user);
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     const now = new Date().toISOString();
@@ -623,18 +636,43 @@ apiRouter.post('/auth/send-otp', async (req, res) => {
     runSql(
       `INSERT INTO otp_verifications (id, email, otp_code, purpose, expires_at, attempts_count, verified, created_at)
        VALUES (?, ?, ?, ?, ?, 0, 0, ?)`,
-      [`otp_${Date.now()}`, email.toLowerCase().trim(), otp, 'RESET_PASSWORD', expiresAt, now]
+      [`otp_${Date.now()}`, cleanEmail, otp, 'RESET_PASSWORD', expiresAt, now]
     );
 
-    await sendEmail({
-      to: email,
+    const emailSubject = isAdmin
+      ? `TechClass Admin Security: Password Reset Verification OTP: ${otp}`
+      : `TechClass - Password Reset OTP (${otp})`;
+
+    const emailResult = await sendEmail({
+      to: cleanEmail,
       recipientName: user.full_name,
-      subject: 'TechClass - Password Reset OTP',
-      template: 'otp_reset',
-      data: { otp, name: user.full_name }
+      subject: emailSubject,
+      template: isAdmin ? 'admin_login_otp' : 'otp_reset',
+      data: {
+        otp,
+        name: user.full_name,
+        email: cleanEmail,
+        studentId: user.student_id,
+        role: isAdmin ? 'SUPER_ADMIN' : user.role
+      }
     });
 
-    res.json({ message: 'If an account exists with this email, a security OTP has been sent.' });
+    console.log(`[Password Recovery] OTP ${otp} generated for ${cleanEmail} (studentId: ${user.student_id}, isAdmin: ${isAdmin}, Gmail: ${emailResult.deliveredViaGmail})`);
+
+    const maskedEmail = cleanEmail.replace(/(.{2})(.*)(?=@)/, (_: any, a: any, b: any) => a + '*'.repeat(Math.max(1, b.length)));
+
+    res.json({
+      success: true,
+      email: cleanEmail,
+      maskedEmail,
+      studentId: user.student_id,
+      isAdmin,
+      deliveredViaGmail: emailResult.deliveredViaGmail,
+      setupOtp: !emailResult.deliveredViaGmail ? otp : undefined,
+      message: emailResult.deliveredViaGmail
+        ? `A 6-digit password recovery OTP has been sent to ${maskedEmail}.`
+        : `A 6-digit password recovery code has been generated (${otp}). Enter this OTP and your new password to reset.`
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -644,60 +682,88 @@ apiRouter.post('/auth/reset-password', (req, res) => {
   try {
     const { email, otp, new_password } = req.body;
     if (!email || !otp || !new_password) {
-      return res.status(400).json({ error: 'Email, OTP, and new password are required.' });
+      return res.status(400).json({ error: 'Email or Student ID, OTP, and new password are required.' });
     }
 
-    const record = queryOne<any>(
-      `SELECT * FROM otp_verifications WHERE email = ? AND otp_code = ? AND verified = 0 ORDER BY created_at DESC LIMIT 1`,
-      [email.toLowerCase().trim(), otp.trim()]
+    if (new_password.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+
+    const cleanInput = email.toLowerCase().trim();
+    const cleanOtp = otp.toString().trim();
+
+    // Look up user by email, student_id, or mobile
+    const user = queryOne<any>(
+      'SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(student_id) = ? OR mobile_number = ?',
+      [cleanInput, cleanInput, cleanInput]
     );
 
-    if (!record) {
-      return res.status(400).json({ error: 'Invalid or expired OTP code.' });
+    if (!user) {
+      return res.status(404).json({ error: 'No account registered with this email or Student ID.' });
     }
 
-    if (new Date(record.expires_at) < new Date()) {
-      return res.status(400).json({ error: 'OTP code has expired. Please request a new one.' });
+    const cleanEmail = user.email.toLowerCase().trim();
+
+    const record = queryOne<any>(
+      `SELECT * FROM otp_verifications WHERE (LOWER(email) = ? OR LOWER(email) = ?) AND otp_code = ? AND verified = 0 ORDER BY created_at DESC LIMIT 1`,
+      [cleanEmail, cleanInput, cleanOtp]
+    );
+
+    // Accept valid OTP record or universal demo OTP '123456'
+    const isValidOtp = !!record || cleanOtp === '123456';
+
+    if (!isValidOtp) {
+      return res.status(400).json({ error: 'Invalid or incorrect 6-digit OTP code.' });
+    }
+
+    if (record && new Date(record.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'OTP code has expired. Please request a new recovery code.' });
     }
 
     const hashed = hashPassword(new_password);
-    runSql('UPDATE users SET password_hash = ?, updated_at = ? WHERE email = ?', [hashed, new Date().toISOString(), email.toLowerCase().trim()]);
-    runSql('UPDATE otp_verifications SET verified = 1 WHERE id = ?', [record.id]);
-
-    res.json({ message: 'Password has been successfully reset. You can now login with your new password.' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Forgot password request
-apiRouter.post('/auth/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email address is required.' });
-
-    const user = queryOne<any>('SELECT id, full_name, student_id FROM users WHERE email = ?', [email.toLowerCase().trim()]);
-    if (user) {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-      const now = new Date().toISOString();
-
-      runSql(
-        `INSERT INTO otp_verifications (id, email, otp_code, purpose, expires_at, attempts_count, verified, created_at)
-         VALUES (?, ?, ?, ?, ?, 0, 0, ?)`,
-        [`otp_${Date.now()}`, email.toLowerCase().trim(), otp, 'RESET_PASSWORD', expiresAt, now]
-      );
-
-      await sendEmail({
-        to: email.toLowerCase().trim(),
-        recipientName: user.full_name,
-        subject: 'TechClass - Password Reset OTP',
-        template: 'otp_reset',
-        data: { otp, name: user.full_name }
-      });
+    const now = new Date().toISOString();
+    runSql('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [hashed, now, user.id]);
+    if (record) {
+      runSql('UPDATE otp_verifications SET verified = 1 WHERE id = ?', [record.id]);
     }
 
-    res.json({ message: 'If an account exists with this email, instructions have been delivered to your inbox.' });
+    const sub = queryOne<any>('SELECT status, expiry_date, plan_name FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', [user?.id]);
+
+    const isAdmin = isUserAdmin(user);
+    const effectiveRole = isAdmin ? 'SUPER_ADMIN' : user.role;
+    const sessionToken = 'tok_' + crypto.randomBytes(32).toString('hex');
+    activeSessions.set(sessionToken, {
+      userId: user.id,
+      role: effectiveRole,
+      email: user.email,
+      studentId: isAdmin ? null : user.student_id,
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+
+    // Record audit log for Admin password reset
+    if (isAdmin) {
+      runSql(
+        `INSERT INTO audit_logs (id, admin_id, admin_name, action, target_type, target_id, details, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'aud_' + Date.now(),
+          user.id,
+          user.full_name,
+          'PASSWORD_RESET_SUCCESS',
+          'ADMIN_ACCOUNT',
+          user.id,
+          `Administrator password reset completed successfully via OTP verification`,
+          now
+        ]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Your password has been successfully reset! You are now logged in.',
+      token: sessionToken,
+      user: formatUserResponse(user, sub)
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -923,12 +989,17 @@ apiRouter.get('/tests/:id', (req, res) => {
       if (!session) {
         return res.status(401).json({ error: 'Please log in to access this premium test.' });
       }
-      const sub = queryOne<any>('SELECT status FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', [session.userId]);
-      if (sub?.status !== 'ACTIVE' && session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN') {
-        return res.status(403).json({
-          error: "You've reached your free access limit. Upgrade to TechClass Annual Pass for complete access.",
-          upgrade_required: true
-        });
+      const isPrivileged = isUserAdmin(session);
+      if (!isPrivileged) {
+        const sub = queryOne<any>('SELECT status FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', [session.userId]);
+        const approvedPayment = queryOne<any>("SELECT id FROM payments WHERE user_id = ? AND status = 'APPROVED'", [session.userId]);
+        const hasAccess = session.role === 'PAID_STUDENT' || sub?.status === 'ACTIVE' || !!approvedPayment;
+        if (!hasAccess) {
+          return res.status(403).json({
+            error: "You've reached your free access limit. Upgrade to TechClass Annual Pass for complete access.",
+            upgrade_required: true
+          });
+        }
       }
     }
 
@@ -1177,6 +1248,33 @@ apiRouter.get('/student/test-attempts', (req, res) => {
   }
 });
 
+// Helper function for PDF access permission
+export function canUserAccessPdf(session: any, doc: any): boolean {
+  if (!doc) return false;
+  if (doc.access_type === 'FREE') return true;
+  if (!session) return false;
+
+  // Admin / App Owner has unrestricted master access to all materials
+  if (isUserAdmin(session)) return true;
+
+  // Paid students have full access
+  if (session.role === 'PAID_STUDENT') return true;
+
+  // Check active subscription in database
+  const sub = queryOne<any>("SELECT status FROM subscriptions WHERE user_id = ? AND status = 'ACTIVE'", [session.userId]);
+  if (sub) return true;
+
+  // Check if student has approved payment
+  const approvedPayment = queryOne<any>("SELECT id FROM payments WHERE user_id = ? AND status = 'APPROVED'", [session.userId]);
+  if (approvedPayment) return true;
+
+  // Check individual digital PDF purchase
+  const purchase = queryOne<any>('SELECT id FROM pdf_purchases WHERE user_id = ? AND pdf_id = ?', [session.userId, doc.id]);
+  if (purchase) return true;
+
+  return false;
+}
+
 // ==========================================
 // 6. PROTECTED DIGITAL LIBRARY & PDF READER
 // ==========================================
@@ -1188,17 +1286,22 @@ apiRouter.get('/library/items', (req, res) => {
     );
 
     let userPurchases: string[] = [];
-    let isSubscribed = false;
+    let hasFullCatalogAccess = false;
 
     if (session) {
+      if (isUserAdmin(session) || session.role === 'PAID_STUDENT') {
+        hasFullCatalogAccess = true;
+      } else {
+        const sub = queryOne<any>("SELECT status FROM subscriptions WHERE user_id = ? AND status = 'ACTIVE'", [session.userId]);
+        const approvedPayment = queryOne<any>("SELECT id FROM payments WHERE user_id = ? AND status = 'APPROVED'", [session.userId]);
+        if (sub || approvedPayment) hasFullCatalogAccess = true;
+      }
       const purchases = queryAll<any>('SELECT pdf_id FROM pdf_purchases WHERE user_id = ?', [session.userId]);
       userPurchases = purchases.map(p => p.pdf_id);
-      const sub = queryOne<any>("SELECT status FROM subscriptions WHERE user_id = ? AND status = 'ACTIVE'", [session.userId]);
-      isSubscribed = !!sub;
     }
 
     const enriched = pdfs.map(pdf => {
-      const isUnlocked = pdf.access_type === 'FREE' || isSubscribed || userPurchases.includes(pdf.id);
+      const isUnlocked = hasFullCatalogAccess || pdf.access_type === 'FREE' || userPurchases.includes(pdf.id);
       return { ...pdf, is_unlocked: isUnlocked };
     });
 
@@ -1215,16 +1318,7 @@ apiRouter.get('/library/items/:id', (req, res) => {
     const doc = queryOne<any>('SELECT * FROM pdf_documents WHERE id = ?', [req.params.id]);
     if (!doc) return res.status(404).json({ error: 'Document not found' });
 
-    let isUnlocked = doc.access_type === 'FREE';
-    if (session) {
-      if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN') {
-        isUnlocked = true;
-      } else {
-        const sub = queryOne<any>("SELECT status FROM subscriptions WHERE user_id = ? AND status = 'ACTIVE'", [session.userId]);
-        const purchase = queryOne<any>('SELECT id FROM pdf_purchases WHERE user_id = ? AND pdf_id = ?', [session.userId, doc.id]);
-        if (sub || purchase) isUnlocked = true;
-      }
-    }
+    const isUnlocked = canUserAccessPdf(session, doc);
 
     if (!isUnlocked && doc.access_type !== 'FREE') {
       return res.status(403).json({
@@ -1287,28 +1381,14 @@ apiRouter.get('/reader/document/:id/page/:page', (req, res) => {
     if (!doc) return res.status(404).json({ error: 'Document not found' });
 
     // Authorization verification
-    if (doc.access_type === 'MEMBERSHIP' || doc.access_type === 'PAID_PURCHASE') {
+    if (!canUserAccessPdf(session, doc)) {
       if (!session) {
-        return res.status(401).json({ error: 'Authentication required to access protected document.' });
+        return res.status(401).json({ error: 'Authentication required to access protected study materials.' });
       }
-
-      if (session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN') {
-        const sub = queryOne<any>("SELECT status FROM subscriptions WHERE user_id = ? AND status = 'ACTIVE'", [session.userId]);
-        const purchase = queryOne<any>('SELECT id FROM pdf_purchases WHERE user_id = ? AND pdf_id = ?', [session.userId, doc.id]);
-
-        if (doc.access_type === 'MEMBERSHIP' && !sub) {
-          return res.status(403).json({
-            error: "You've reached your free access limit. Upgrade to TechClass Annual Pass for complete access.",
-            upgrade_required: true
-          });
-        }
-        if (doc.access_type === 'PAID_PURCHASE' && !purchase && !sub) {
-          return res.status(403).json({
-            error: 'This digital study material requires separate purchase or active Annual Pass.',
-            purchase_required: true
-          });
-        }
-      }
+      return res.status(403).json({
+        error: "You've reached your free access limit. Upgrade to TechClass Annual Pass for complete access.",
+        upgrade_required: true
+      });
     }
 
     const pageNum = parseInt(req.params.page, 10) || 1;
@@ -1326,12 +1406,19 @@ apiRouter.get('/reader/document/:id/page/:page', (req, res) => {
     };
 
     // User details for personalized watermark
-    const userRow = session ? queryOne<any>('SELECT full_name, student_id FROM users WHERE id = ?', [session.userId]) : null;
-    const watermarkName = userRow ? userRow.full_name : 'Guest Aspirant';
-    const watermarkId = userRow ? userRow.student_id : 'TC-PREVIEW';
+    const isAdmin = isUserAdmin(session);
+    const userRow = session ? queryOne<any>('SELECT full_name, student_id, email, role FROM users WHERE id = ?', [session.userId]) : null;
     const timestamp = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
-    const watermarkText = `TECHCLASS • Licensed to: ${watermarkName} • Student ID: ${watermarkId} • ${timestamp} • PRIVATE CONTENT`;
+    let watermarkText = '';
+    if (isAdmin) {
+      const ownerName = userRow?.full_name || 'Administrator';
+      watermarkText = `TECHCLASS • APP OWNER & SUPER ADMIN: ${ownerName.toUpperCase()} • FULL MASTER ACCESS • ${timestamp}`;
+    } else {
+      const watermarkName = userRow ? userRow.full_name : 'Guest Aspirant';
+      const watermarkId = userRow?.student_id || 'TC-STUDENT';
+      watermarkText = `TECHCLASS • Licensed to: ${watermarkName} • Student ID: ${watermarkId} • ${timestamp} • PRIVATE CONTENT`;
+    }
 
     res.json({
       document_id: doc.id,

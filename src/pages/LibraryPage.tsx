@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { PdfDocument } from '../types';
+import { apiFetch } from '../lib/api';
 import {
   Library,
   FileText,
@@ -12,7 +13,9 @@ import {
   Sparkles,
   Lock,
   ArrowRight,
-  BookOpen
+  BookOpen,
+  Crown,
+  CheckCircle2
 } from 'lucide-react';
 
 interface LibraryPageProps {
@@ -20,7 +23,7 @@ interface LibraryPageProps {
 }
 
 export const LibraryPage: React.FC<LibraryPageProps> = ({ navigate }) => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { t } = useLanguage();
   const [docs, setDocs] = useState<PdfDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,19 +38,19 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({ navigate }) => {
     if (selectedExam !== 'ALL') url += `exam=${encodeURIComponent(selectedExam)}&`;
     if (selectedAccess !== 'ALL') url += `access_type=${encodeURIComponent(selectedAccess)}&`;
 
-    fetch(url)
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<PdfDocument[]>(url)
       .then(data => {
         if (Array.isArray(data)) setDocs(data);
       })
       .catch(err => console.error(err))
       .finally(() => setLoading(false));
-  }, [searchQuery, selectedExam, selectedAccess]);
+  }, [searchQuery, selectedExam, selectedAccess, token]);
 
   const exams = ['ALL', 'MPSC', 'UPSC', 'SSC', 'General Studies'];
   const accessFilters = ['ALL', 'FREE', 'MEMBERSHIP'];
 
-  const isPaid = user?.membership_status === 'ACTIVE' || user?.role === 'PAID_STUDENT' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const isOwnerOrAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.email === 'admin@techclass.in' || user?.email === 'dynodazzle@gmail.com';
+  const isPaid = user?.membership_status === 'ACTIVE' || user?.role === 'PAID_STUDENT' || isOwnerOrAdmin;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
@@ -123,7 +126,8 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({ navigate }) => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {docs.map(doc => {
-            const needsUpgrade = doc.access_type === 'MEMBERSHIP' && !isPaid;
+            const hasAccess = doc.access_type === 'FREE' || isPaid || !!doc.is_unlocked;
+            const needsUpgrade = !hasAccess;
 
             return (
               <div
@@ -135,11 +139,25 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({ navigate }) => {
                     <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
                       {doc.exam}
                     </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      doc.access_type === 'FREE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
-                    }`}>
-                      {doc.access_type === 'FREE' ? 'FREE PDF' : 'ANNUAL PASS'}
-                    </span>
+                    <div className="flex items-center space-x-1.5">
+                      {isOwnerOrAdmin && (
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 flex items-center space-x-1">
+                          <Crown className="w-2.5 h-2.5 text-purple-400" />
+                          <span>Owner Access</span>
+                        </span>
+                      )}
+                      {doc.is_unlocked && !isOwnerOrAdmin && (
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 flex items-center space-x-1">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                          <span>Purchased</span>
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        doc.access_type === 'FREE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                      }`}>
+                        {doc.access_type === 'FREE' ? 'FREE PDF' : 'ANNUAL PASS'}
+                      </span>
+                    </div>
                   </div>
 
                   <h3 className="text-base font-bold text-white line-clamp-2">{doc.title}</h3>

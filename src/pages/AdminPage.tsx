@@ -37,7 +37,7 @@ interface AdminPageProps {
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
-  const { user, token } = useAuth();
+  const { user, token, updateUserData } = useAuth();
 
   const [activeTab, setActiveTab] = useState<
     'METRICS' | 'SUPABASE' | 'PDFS' | 'COURSES' | 'TESTS' | 'STUDENTS' | 'PAYMENTS' | 'SETTINGS' | 'LOGS'
@@ -102,7 +102,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
     );
   }
 
-  if (user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+  const isOwnerOrAdmin =
+    user?.role === 'ADMIN' ||
+    user?.role === 'SUPER_ADMIN' ||
+    user?.email?.toLowerCase().trim() === 'dynodazzle@gmail.com' ||
+    user?.email?.toLowerCase().trim() === 'admin@techclass.in' ||
+    Boolean(user?.is_admin) ||
+    Boolean(user?.is_owner);
+
+  // Auto-sync administrative privileges if owner/admin is logged in
+  useEffect(() => {
+    if (user && isOwnerOrAdmin && user.role !== 'SUPER_ADMIN') {
+      updateUserData({
+        role: 'SUPER_ADMIN',
+        is_admin: true,
+        is_owner: true,
+        membership_status: 'ACTIVE',
+        plan_name: 'App Owner / Lifetime Master Pass'
+      });
+    }
+  }, [user?.email, user?.role, isOwnerOrAdmin]);
+
+  if (!isOwnerOrAdmin) {
     return (
       <div className="max-w-md mx-auto my-16 p-8 rounded-3xl bg-slate-900 border border-red-500/30 text-center space-y-5 shadow-2xl">
         <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center mx-auto">

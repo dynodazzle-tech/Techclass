@@ -23,6 +23,8 @@ export interface User {
   study_streak?: number;
   total_study_minutes?: number;
   bio?: string;
+  is_admin?: boolean;
+  is_owner?: boolean;
 }
 
 export interface SiteSettings {

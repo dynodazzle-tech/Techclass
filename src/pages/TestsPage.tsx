@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { TestPaper } from '../types';
-import { FileCheck2, Clock, Award, Filter, ArrowRight, ShieldAlert, Sparkles, CheckCircle2 } from 'lucide-react';
+import { apiFetch } from '../lib/api';
+import { FileCheck2, Clock, Award, Filter, ArrowRight, ShieldAlert, Sparkles, CheckCircle2, Crown } from 'lucide-react';
 
 interface TestsPageProps {
   navigate: (path: string) => void;
@@ -19,10 +20,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ navigate }) => {
 
   useEffect(() => {
     // Fetch user's previous attempts to link results
-    const token = localStorage.getItem('token');
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch('/api/student/test-attempts', { headers })
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<any[]>('/api/student/test-attempts')
       .then(data => {
         if (Array.isArray(data)) {
           const map: Record<string, any> = {};
@@ -43,8 +41,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ navigate }) => {
     if (selectedExam !== 'ALL') url += `exam=${encodeURIComponent(selectedExam)}&`;
     if (selectedType !== 'ALL') url += `type=${encodeURIComponent(selectedType)}&`;
 
-    fetch(url)
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<TestPaper[]>(url)
       .then(data => {
         if (Array.isArray(data)) setTests(data);
       })
@@ -55,7 +52,8 @@ export const TestsPage: React.FC<TestsPageProps> = ({ navigate }) => {
   const exams = ['ALL', 'MPSC', 'SSC', 'UPSC', 'Police Bharti', 'Banking'];
   const types = ['ALL', 'MOCK', 'PRACTICE', 'PYQ'];
 
-  const isPaid = user?.membership_status === 'ACTIVE' || user?.role === 'PAID_STUDENT' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const isOwnerOrAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.email === 'admin@techclass.in' || user?.email === 'dynodazzle@gmail.com';
+  const isPaid = user?.membership_status === 'ACTIVE' || user?.role === 'PAID_STUDENT' || isOwnerOrAdmin;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">

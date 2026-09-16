@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Course } from '../types';
+import { apiFetch } from '../lib/api';
 import { BookOpen, Filter, ArrowRight, CheckCircle2, ChevronRight, Sparkles } from 'lucide-react';
 
 interface CoursesPageProps {
@@ -21,8 +22,7 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ navigate }) => {
     let url = '/api/courses?';
     if (selectedExam !== 'ALL') url += `exam=${encodeURIComponent(selectedExam)}&`;
 
-    fetch(url)
-      .then(res => (res.ok ? res.json() : []))
+    apiFetch<Course[]>(url)
       .then(data => {
         if (Array.isArray(data)) setCourses(data);
       })

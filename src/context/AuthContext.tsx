@@ -37,8 +37,31 @@ const AuthContext = createContext<AuthContextType>({
   quickSwitchRole: async () => {}
 });
 
+const normalizeUser = (u: User): User => {
+  const cleanEmail = u.email?.toLowerCase().trim();
+  if (cleanEmail === 'dynodazzle@gmail.com' || cleanEmail === 'admin@techclass.in' || u.is_owner || u.role === 'SUPER_ADMIN') {
+    return {
+      ...u,
+      role: 'SUPER_ADMIN',
+      is_admin: true,
+      is_owner: true,
+      membership_status: 'ACTIVE',
+      plan_name: u.plan_name || 'App Owner / Lifetime Master Pass'
+    };
+  }
+  return u;
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const cached = localStorage.getItem('techclass_user_cache');
+      if (cached) {
+        return normalizeUser(JSON.parse(cached));
+      }
+    } catch (e) {}
+    return null;
+  });
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('techclass_token'));
   const [settings, setSettings] = useState<SiteSettings | null>(defaultSettings);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,10 +89,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     apiFetch('/api/auth/me')
       .then(data => {
         if (data && data.user) {
-          setUser(data.user);
+          const norm = normalizeUser(data.user);
+          setUser(norm);
+          try {
+            localStorage.setItem('techclass_user_cache', JSON.stringify(norm));
+          } catch (e) {}
         } else {
           // Stale token
           localStorage.removeItem('techclass_token');
+          localStorage.removeItem('techclass_user_cache');
           setToken(null);
           setUser(null);
         }
@@ -79,12 +107,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const localUser = localStorage.getItem('techclass_user_cache');
           if (localUser) {
-            setUser(JSON.parse(localUser));
+            setUser(normalizeUser(JSON.parse(localUser)));
             return;
           }
         } catch (e) {}
 
         localStorage.removeItem('techclass_token');
+        localStorage.removeItem('techclass_user_cache');
         setToken(null);
         setUser(null);
       })
@@ -94,12 +123,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   const login = (newToken: string, userData: User) => {
+    const normalized = normalizeUser(userData);
     localStorage.setItem('techclass_token', newToken);
     try {
-      localStorage.setItem('techclass_user_cache', JSON.stringify(userData));
+      localStorage.setItem('techclass_user_cache', JSON.stringify(normalized));
     } catch (e) {}
     setToken(newToken);
-    setUser(userData);
+    setUser(normalized);
   };
 
   const logout = () => {
@@ -114,7 +144,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateUserData = (updated: Partial<User>) => {
     if (user) {
-      setUser({ ...user, ...updated });
+      const merged = normalizeUser({ ...user, ...updated });
+      setUser(merged);
+      try {
+        localStorage.setItem('techclass_user_cache', JSON.stringify(merged));
+      } catch (e) {}
     }
   };
 

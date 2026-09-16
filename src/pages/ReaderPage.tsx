@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { PdfDocument, PdfPage } from '../types';
+import { apiFetch } from '../lib/api';
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,7 +18,8 @@ import {
   ArrowLeft,
   Lock,
   Maximize2,
-  FileText
+  FileText,
+  Crown
 } from 'lucide-react';
 
 interface ReaderPageProps {
@@ -49,16 +51,7 @@ export const ReaderPage: React.FC<ReaderPageProps> = ({ pdfId, navigate }) => {
   // Fetch document & page content
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/library/items/${pdfId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    })
-      .then(async res => {
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to open document');
-        }
-        return res.json();
-      })
+    apiFetch<PdfDocument & { pages?: PdfPage[] }>(`/api/library/items/${pdfId}`)
       .then(data => {
         setDoc(data);
         if (data.pages && Array.isArray(data.pages)) {
@@ -67,7 +60,7 @@ export const ReaderPage: React.FC<ReaderPageProps> = ({ pdfId, navigate }) => {
         }
       })
       .catch(err => {
-        setError(err.message);
+        setError(err.message || 'Failed to open document');
       })
       .finally(() => setLoading(false));
   }, [pdfId, token]);
@@ -175,9 +168,12 @@ export const ReaderPage: React.FC<ReaderPageProps> = ({ pdfId, navigate }) => {
   };
 
   // Personalized dynamic watermark string
-  const studentName = user?.full_name || 'Registered Aspirant';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.email === 'admin@techclass.in' || user?.email === 'dynodazzle@gmail.com';
+  const studentName = user?.full_name || (isAdmin ? 'TechClass Owner & Administrator' : 'Registered Aspirant');
   const studentId = user?.student_id || 'TC100001';
-  const watermarkText = `TECHCLASS • LICENSED TO: ${studentName.toUpperCase()} • ID: ${studentId} • DO NOT DISTRIBUTE`;
+  const watermarkText = isAdmin
+    ? `TECHCLASS • APP OWNER & SUPER ADMIN: ${studentName.toUpperCase()} • FULL MASTER ACCESS • DO NOT DISTRIBUTE`
+    : `TECHCLASS • LICENSED TO: ${studentName.toUpperCase()} • ID: ${studentId} • DO NOT DISTRIBUTE`;
 
   // Reader theme styles
   let containerBg = 'bg-[#fcfaf2] text-[#1c1917]'; // E-Ink Paper
@@ -374,7 +370,7 @@ export const ReaderPage: React.FC<ReaderPageProps> = ({ pdfId, navigate }) => {
           {/* Page Footer */}
           <div className="relative z-10 pt-6 border-t border-current/10 flex items-center justify-between text-xs opacity-75">
             <span className="font-mono text-[10px]">
-              Licensed to: {studentName} ({studentId})
+              {isAdmin ? `Super Admin & App Owner: ${studentName} (Full Access)` : `Licensed to: ${studentName} (${studentId})`}
             </span>
             <span className="font-bold">Page {currentPage}</span>
           </div>

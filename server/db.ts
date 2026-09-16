@@ -502,14 +502,14 @@ export async function initDatabase(): Promise<Database> {
   }
 
   // Seed Users
-  // 1. Super Admin
+  // 1. Super Admin (App Owner)
   const adminId = 'usr_admin_01';
   db.run(
     `INSERT OR IGNORE INTO users (id, student_id, full_name, email, mobile_number, password_hash, role, preferred_language, target_exams, state, city, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       adminId,
-      'TC000001',
+      'APP_ADMIN',
       'TechClass Administrator',
       'admin@techclass.in',
       '+91 7770032149',
@@ -808,8 +808,8 @@ export function ensureAdminUsers() {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         'usr_dynodazzle_admin',
-        'TC000000',
-        'DynoDazzle Administrator',
+        'APP_OWNER',
+        'DynoDazzle (App Owner)',
         dynoEmail,
         '+91 7770032149',
         hashedPass,
@@ -823,14 +823,17 @@ export function ensureAdminUsers() {
         now
       ]
     );
-    console.log('[Database] Seeded Super Admin: dynodazzle@gmail.com with password Vicky@12345');
+    console.log('[Database] Seeded Super Admin & App Owner: dynodazzle@gmail.com with password Vicky@12345');
   } else {
     db.run(
-      `UPDATE users SET password_hash = ?, role = 'SUPER_ADMIN', status = 'ACTIVE', updated_at = ? WHERE email = ?`,
+      `UPDATE users SET student_id = 'APP_OWNER', full_name = 'DynoDazzle (App Owner)', password_hash = ?, role = 'SUPER_ADMIN', status = 'ACTIVE', updated_at = ? WHERE email = ?`,
       [hashedPass, now, dynoEmail]
     );
     console.log('[Database] Updated Super Admin: dynodazzle@gmail.com with password Vicky@12345');
   }
+
+  // Also ensure admin@techclass.in is not assigned a student ID
+  db.run("UPDATE users SET student_id = 'APP_ADMIN', role = 'SUPER_ADMIN' WHERE email = 'admin@techclass.in'");
 
   // Ensure Gmail SMTP credentials configured
   const userRow = queryOne('SELECT value FROM site_settings WHERE key = ?', ['gmail_user']);
